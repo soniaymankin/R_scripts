@@ -1,0 +1,147 @@
+---
+title: "Assignment_3_LNM"
+output: html_document
+date: "2023-02-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Load claim history
+
+```{r}
+claim_data <- read.csv("~/Downloads/claim_history.csv", stringsAsFactors=TRUE)
+head(claim_data)
+```
+
+We select our columns that we want to use for our initial exploratory data analysis. 
+
+```{r }
+col_names = c('MSTATUS',
+                  'CAR_TYPE',
+                  'REVOKED',
+                  'URBANICITY',
+                  'CAR_AGE',
+                  'MVR_PTS',
+                  'TIF',
+                  'TRAVTIME')
+
+filtered_data <- na.omit(claim_data)
+filtered_data$FREQUENCY <- filtered_data$CLM_COUNT/filtered_data$EXPOSURE
+filtered_data$EVENT <- as.factor(ifelse(filtered_data$FREQUENCY>1,'YES','NO'))
+df_EDA <- filtered_data[,col_names]
+```
+## A. Generate a line chart that shows the odds of the Event by the predictor’s unique values.
+```{r}
+library(ggplot2)
+
+data_frames <- list()
+plots <- list() 
+i = 0
+for (var in col_names){
+  i = i+1
+  data_frames[[i]] <- data.frame(table(df_EDA[,var],filtered_data$EVENT)[,2]/table(df_EDA[,var],filtered_data$EVENT)[,1])
+  data_frames[[i]]$name <- rownames(data_frames[[i]])
+  colnames(data_frames[[i]]) <- c("odds","predictor")
+  plots[[i]] <- ggplot(data_frames[[i]], aes(predictor,odds,group=1)) +
+         geom_point() + geom_line() + labs(x = "Value", y = "Odds") + 
+         ggtitle(col_names[i])
+}
+plots
+
+```
+
+## B. Enter the predictors into the model using Forward Selection. 
+
+```{r}
+library(MASS)
+mod <-glm(EVENT ~ 1, data=filtered_data, family=binomial)
+mod1 <- stepAIC(mod,direction='forward',scope=formula(glm(EVENT ~ MSTATUS+CAR_TYPE+REVOKED+URBANICITY+CAR_AGE+MVR_PTS+TIF+TRAVTIME, data=filtered_data, family=binomial)),trace=FALSE)
+mod1
+```
+
+1. Predictors entered
+
+```{r}
+summary(mod1)
+```
+2. Log-likelihood value 
+
+```{r}
+logLik(mod1)
+```
+
+3. You can see the Deviance Chi-Squared statistic (deviance), deviance degree of freedom (df), and chi-squared significance (Pr(>Chi)) in the anova table below. 
+
+```{r}
+anova(mod1,test='Chisq')
+```
+## C. My final model contained eight predictors: Marital Status, car type, revoked, urbanicity, car age, MVR points, TIF, and travel time. 
+
+## D. Below you will see a table of the complete set of parameters of your final model along with the exponentiated estimates. 
+```{r}
+parameters <- mod1$coefficients
+param_table <- data.frame(parameters)
+param_table$exponentiated_estimates <- exp(param_table$parameters)
+param_table
+```
+
+# 2. Visually assessing the model
+
+## A. Predicted Event probability versus the observed Frequency
+
+```{r}
+preds <- predict(mod1,type='response')
+chart_df <- data.frame(cbind(preds,filtered_data$FREQUENCY,filtered_data$EXPOSURE))
+colnames(chart_df) <- c('predicted_probability','observed_frequency','exposure')
+ggplot(chart_df, aes(predicted_probability,observed_frequency,colour=exposure))+geom_point()+ggtitle("Predicted Probability vs Observed Frequency")
+```
+As we can see in the graph above the predicted probability and the observed frequency has pretty significant overlap which indicates that our model performed well. The points for which there was a high observed frequency tended to have lower exposure and a lower predicted probability overall. 
+
+## B. Deviance residuals versus the observed Frequency.
+
+```{r}
+dev_residuals <- residuals(mod1,type='deviance')
+chart_df2 <- data.frame(cbind(dev_residuals,filtered_data$FREQUENCY,filtered_data$EXPOSURE))
+
+colnames(chart_df2) <- c('deviance_residuals','observed_frequency','exposure')
+
+ggplot(chart_df2, aes(deviance_residuals,observed_frequency,colour=exposure))+geom_point()+ggtitle("Deviance Residuals vs Observed Frequency")
+
+```
+In our deviance residuals graph versus our observed frequency. We find that all outcomes with positive deviance tend to have low exposure and has higher variability. This is suggesting that with higher deviating data our model does not perform as well. 
+
+# 3. Accuracy Metric
+
+Using a confusion matrix we can see the accuracy of our model is 71%. 
+
+```{r}
+library(caret)
+
+filtered_data$preds <- predict(mod1,filtered_data,type='response')
+accuracy <- as.factor(ifelse(preds>=0.25,"YES","NO"))
+confusionMatrix(data=accuracy,reference=filtered_data$EVENT)
+```
+
+## Bonus
+
+```{r}
+#install.packages('mlbench')
+#install.packages("randomForest")
+library(randomForest)
+library(mlbench)
+
+# define the control using a random forest selection function
+control = rfeControl(functions=rfFuncs, method="repeatedcv", number=10, repeats = 1) # method="cv" , leave out repeats to speed up or method = "repeatedcv", and leave out repeats 
+# run the RFE algorithm
+set.seed(143)
+#
+filtered_data$TARGET <- as.factor(ifelse(filtered_data$EVENT=='YES',1,0))
+
+results = rfe(df_EDA, filtered_data$TARGET,sizes=c(1:8),rfeControl=control,verbose=FALSE)
+# summarize the results
+print(results)
+```
+
+
