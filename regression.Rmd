@@ -1,0 +1,119 @@
+---
+title: "Assignment_1_soniamankin"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-01-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment 1 German Credit Data
+
+### Modeling and Data Validation
+
+1. Below is the code used to generate a linear model from the german credit data in the caret package in R. 
+I used all of the columns as predictors except for the class column to model the credit amount as the response variable. 
+``` {r, echo=TRUE, warning=FALSE}
+#install.packages("caret")
+#install.packages('Rmisc')
+library(caret)
+library(Rmisc)
+data(GermanCredit)
+#head(GermanCredit)
+
+germ_credit_noclass <- GermanCredit[,!(names(GermanCredit)) %in% c('Class')]
+model <- lm(Amount~.,germ_credit_noclass)
+#summary(model)
+
+```
+2. I split the data into test and train datasets in the 632 to 328 ratios respectively. I used my model on the training dataset and predicted the results of running my model on the testing dataset. I saved the model coefficients, R squared of running the model on the training dataset, and calculated the R-squared of running the model on the testing dataset. I repeated this process 1000 times setting the seed at the beginning for reproducibility. 
+
+```{r count, echo=FALSE, warning=FALSE}
+set.seed(20230102)
+df <- data.frame()
+
+for (i in 1:1000){
+  split1<- sample(c(rep(0, 0.632 * nrow(germ_credit_noclass)), rep(1, 0.328 * nrow(germ_credit_noclass))))
+  train <- germ_credit_noclass[split1 == 0, ]            
+  test <- germ_credit_noclass[split1==1,]
+  
+  lm_train = lm(Amount ~ ., data = train)
+  output = c(lm_train$coefficients, summary(lm_train)$r.squared, cor(test$Amount, predict(lm_train, newdata = test))^2)
+  df=rbind(df, output)
+  colnames(df) <- c('(Intercept)',colnames(germ_credit_noclass[,!(names(germ_credit_noclass)) %in% c('Amount')]), "R-Squared", "R-Squared holdout")
+  
+}
+
+```
+
+3. I chose 3 coefficients distributions to plot in a histogram from the 1000 runs of the model on the training/test dataset. The three coefficients I chose were: Housing Ownership, Installment Rate Percentage, and Age. 
+```{r, echo=FALSE, warning=FALSE}
+hist(df$`Housing.Own`,xlab='Coefficient',main='Housing Ownership')
+hist(df$`InstallmentRatePercentage`,xlab='Coefficient',main='Installment Rate Percentage')
+hist(df$`Age`,xlab = 'Coefficient',main='Age')
+```
+
+4. Then I plotted the distribution of R-squareds using our training dataset. 
+
+``` {r, echo=FALSE,warning=FALSE}
+hist(df$`R-Squared`,xlab='R-Squared',main='Histogram of R-Squared in Train data')
+```
+
+5. I then calculated the difference in r-squareds between our training dataset and testing dataset and plotted them below. As seen in the chart above, R-squared for the training dataset typically is between 0.61 and 0.62. The difference in r-squareds follows a normal distribution and on average had around a 10% decrease from the training to the test dataset. Because this is more of a social science dataset, and we're not conducting machine learning algorithms - an R-squared of above 0.6 indicates that around 60% of the amount of variance in the amount of credit can be attributed to our predictors which is pretty high predictive power. 
+
+```{r, echo=FALSE, warning=FALSE}
+df['R-Squared.diff'] <- (df['R-Squared'] - df['R-Squared holdout'])/df['R-Squared']
+hist(df$`R-Squared.diff`,xlab='R-squared decrease',main='Histogram of R-Squared Pct Change Train vs Holdout')
+```
+
+You can see the table of R-squareds from the training data, R-squared from the test data, and percent difference in the table below. 
+
+```{r, echo=TRUE, warning=FALSE}
+r.sq <- df[62:64]
+head(r.sq)
+```
+
+6. I then calculated the mean of the repeated sample coefficients and compared them to the coefficient values from the original model that used the whole dataset. See the table below for the mean of the sample coefficients, coefficient values, and percent changes. The difference between the means fell between -1 and 1 for all of the samples indicating that the discrepancy between our replicated sample model and our model using the full dataset is relatively small. 
+
+```{r, echo=TRUE,warning=FALSE}
+mean.coefficients <- colMeans(df)
+mean.df <- cbind(mean.coefficients,model$coefficients)
+colnames(mean.df) <- c('mean.coefficients','original.model.coefficients')
+
+mean.df <- as.data.frame(mean.df)
+mean.df['coefficient.pct.chg']<- (mean.df['mean.coefficients'] - mean.df['original.model.coefficients'])/mean.df['mean.coefficients']
+colnames(mean.df) <- c('Mean repeated samples','Full Sample Coefficients','% Difference')
+head(mean.df)
+```
+
+### Confidence Intervals
+
+7. I calculated the confidence intervals for each of the coefficients in both the repeated sample model and the full dataset model. See the table below for the upper and lower bounds for both the repeated sample model and full dataset model as well as their respective widths. 
+
+``` {r, echo=TRUE,warning=FALSE}
+
+confint.sample <- as.data.frame(t(sapply(df[1:61], function(x) CI(x))))
+confint.sample['Width(scaled)'] <- (confint.sample$upper-confint.sample$lower)*sqrt(0.632)
+confint.full <- as.data.frame(confint(model))
+confint.full['Width'] <- confint.full$`97.5 %`- confint.full$`2.5 %`
+confint.df <- cbind(confint.sample,confint.full)
+
+fin.confint <- confint.df[,!(names(confint.df)) %in% c('mean')]
+colnames(fin.confint) <- c('sample upper bounds','sample lower bounds','scaled width','full lower bounds','full upper bounds','Width')
+head(fin.confint)
+
+```
+
+8. I compared the scaled widths of the repeated sample model confidence intervals to the widths of the full model confidence intervals and counted 48 coefficients in which the repeated sample confidence intervals were tighter than the full model confidence intervals. See table below. The remainder of all coefficients were NA so all coefficients had tighter confidence intervals in the repeated sample model. This indicates that our method of using training and testing data generates more precise and accurate coefficients because a narrower confidence interval indicates that if we were to run the same model on a different sample we are reasonably sure we would get a similar result. If we ran this replicated sample loop on 10,000 observations then presumably we would get even tighter confidence intervals because we are running the model on 10 times the amount of data which allows us to account for more variability. 
+
+``` {r,echo=TRUE,warning=FALSE}
+
+confint.df$is_tight <- ifelse(confint.df$`Width(scaled)` < confint.df$Width,1,0)
+number.of.tighter <- as.data.frame(length(which(confint.df$is_tight==1)))
+colnames(number.of.tighter) <- c('Number of Confints that are Tighter')
+number.of.tighter
+
+```

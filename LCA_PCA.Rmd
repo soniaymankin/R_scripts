@@ -1,0 +1,197 @@
+---
+title: "group10_assignment3"
+output: html_document
+date: "2023-01-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE}
+#install.packages("poLCA")
+library("poLCA")
+#install.packages("ggplot2")
+library("ggplot2")
+```
+## Part 1
+
+We loaded the german credit data from ics website and renamed the variable columns. 
+```{r}
+GermanCredit <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data", stringsAsFactors = TRUE)
+colnames(GermanCredit) <-c("CheckingAccountStatus","Duration","CreditHistory", "Purpose", "Amount", "SavingsAccountBonds", "EmploymentDuration", "InstallmentRatePercentage","Personal",  "OtherDebtorsGuarantors", "ResidenceDuration", "Property", "Age", "OtherInstallmentPlans", "Housing", "NumberExistingCredits", "Job", "NumberPeopleMaintenance", "Telephone", "ForeignWorker", "Class")
+```
+
+### 1. Variable Selection
+LCA will likely perform better if we select variables that have the same or similar numbers of levels. A glimpse of the data shows that 4-5 levels covers most of the relevant categorical variables. We selected `CheckingAccountStatus`,`CreditHistory`,`SavingsAccountBonds`,`EmploymentDuration`,`Personal`,`Property`, and `Job` variables because all of these variables at 4-5 categories. 
+```{r}
+GC_latent <- GermanCredit[,c("CheckingAccountStatus","CreditHistory","SavingsAccountBonds","EmploymentDuration","Personal","Property","Job")]
+```
+
+### 2. Splitting into Test and Train
+We split the data into train and test. Then we ran latent class analysis on train data set and saved the AIC and BIC. We replicated this for cluster sizes 2-6. 
+```{r}
+# Split sample into train and test using 70-30 ratio
+train_size <- floor(0.7 * nrow(GC_latent))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(GC_latent)), size = train_size)
+train <- GC_latent[train_ind, ]
+test <- GC_latent[-train_ind, ]
+
+AIC <- data.frame()
+BIC <- data.frame()
+
+# build a for loop 
+for (i in 2:6){
+  set.seed(123)
+  f <- cbind(CheckingAccountStatus,CreditHistory,SavingsAccountBonds,EmploymentDuration,Personal,Property,Job)~1
+  LC <- poLCA(f, data=train, nclass=i, nrep=50, verbose = FALSE) 
+  AIC <- rbind(AIC,LC$aic)
+  BIC <- rbind(BIC,LC$bic)
+}
+```
+
+We plotted BIC as well AIC against number of clusters. As shown below via the elbow rule, 3 is the best number of clusters.
+```{r, echo=FALSE}
+AIC$group <- "AIC"
+BIC$group <- "BIC"
+AIC$cluster <- seq(2,6)
+BIC$cluster <- seq(2,6)
+colnames(AIC) <- c("value","group","cluster")
+colnames(BIC) <- c("value","group","cluster")
+AIC_BIC <- rbind(AIC, BIC)
+mycolors <- c("AIC"="blue", "BIC"="red")
+
+ggplot(AIC_BIC, aes(x=cluster, y=value, group=group, color=group)) +
+  geom_path() +
+  geom_point() +
+  scale_color_manual(name="group", values = mycolors) +
+  theme(
+    axis.title.y = element_text(color = "black"),
+    axis.text.y = element_text(color = "black"),
+    axis.title.y.right = element_text(color = mycolors["BIC"]),
+    axis.text.y.right = element_text(color = mycolors["BIC"])
+)+ ggtitle('AIC and BIC vs Cluster Size')
+```
+
+### 3. Model Validation
+We ran our model using the test data to validate. As seen by the charts below our clusters did switch around in terms of order. Looking at the distributions of the probabilities comparing class 3 in our train data to class 1 in our test and class 2 across both and class 1 in our train data to class 3 in our tests, the distributions follow similar patterns indicating that our model is relatively stable. 
+```{r}
+set.seed(123)
+lca_train <- poLCA(f, data=train, nclass=3, graphs = TRUE, verbose = FALSE) 
+set.seed(123)
+lca_test <- poLCA(f, data=test, nclass=3, graphs = TRUE, probs.start=lca_train$probs, nrep=50, verbose = FALSE)
+```
+
+We printed class sizes and conditional probabilities of the train model and the test model. 
+```{r}
+lca_train$P
+lca_test$P
+lca_train$probs
+lca_test$probs
+```
+
+### 4. Class Categorization
+We decided to isolate variables that looked distinct across the classes in terms of distribution. We focused on `EmploymentDuration`,`Personal`, `Property`, and `Job`. 
+
+Class 1 has `EmploymentDuration` skewed heavily in the middle category which is 1-4 yrs of employment duration. For `Personal`, Class 1 has the highest amounts across the classes in the female: divorced/separated/married category and male: married/widowed category. For `Property`, class 1 had the lowest value in category 4 which is unknown/no properties so class 1 tends to skew more property owner due to their high value in category 1 for `property`. For `Job`, class 1 has the highest values in categories 2 and 3 which indicates unskilled and skilled workers. We will label class 1 young professionals who are or have been married. 
+
+Class 2 has `EmploymentDuration` skewed in categories 3-5 with the highest value in category 5. Therefore class 2 has been employed for the longest with 7+ years in category 5. For `Personal`, class 2 has the highest value in category 3 which is single males. For `property`, class 2 has mostly categories 1-4 with the higher value in category 3 which codes for ownership of cars. For `Job`, class 2 has the highest value in category 3 which indicates skilled workers. We can label this class single men who have worked for the longest, own cars, and are skilled. 
+
+Class 3 has `EmploymentDuration` skewed in category 1 which is unemployed. For `Personal`, class 3 has higher values in categories 2 and 3 which is female: divorced/separated/married and male: single respectively. For `property`, class 3 has the largest value in category 4 which means they don't own property. For `Job`, class 3 has the highest values in categories 1 and 4 which are unemployed and self-employed/highly qualified employees/officers. 
+
+### 5. Difficulty of naming classes 
+This exercise of naming classes and categories was particularly hard because we had to look up what each category corresponded to. There are also a large number of variables with similar trends across categories. Additionally the categories do not seem exclusive for example one category included married and divorced women. Class 3 was particularly confounding on the `job` variable because self-employed and highly qualified employees, self-employed seems like it could have a high degree of ambiguity. 
+
+## Part 2
+We loaded in the Boston Housing dataset.
+```{r}
+library(MASS)
+data(Boston)
+head(Boston)
+```
+
+### Variable Selection
+We selected variables: `crim`,`zn`,`indus`,`nox`,`rm`,`age`,`dis`,`tax`,`ptratio`,`black`,`lstat`. We excluded `chas` and `rad` because `chas` was an indicator variable indicating whether or not the tract bounds the river. `Rad` is an index variable which indicates accessibility to radial highways. 
+```{r}
+vars <- c('crim','zn','indus','nox','rm','age','dis','tax','ptratio','black','lstat')
+
+bos <- Boston[vars]
+head(bos)
+```
+
+### 1. Splitting data into train and test
+```{r}
+set.seed(42)
+dt <- sort(sample(nrow(bos), nrow(bos)*.70)) # perform sampling without replacement. Split into train and test
+train <- bos[dt,]
+test <- bos[-dt,]
+```
+
+### Scale data
+We applied scales to data to ensure that the means are equal to 0 and the standard deviations are equal to 1. 
+```{r}
+# find mean and sd column-wise of training data
+trainMean <- apply(train,2,mean)
+trainSd <- apply(train,2,sd)
+
+# using standard scaling
+train_scale <- sweep(sweep(train, 2L, trainMean), 2, trainSd, "/")
+test_scale <- sweep(sweep(test, 2L, trainMean), 2, trainSd, "/")
+```
+
+
+### 2. Run model
+```{r}
+set.seed(123)
+pca_train <- princomp(train_scale)
+pca_train
+```
+
+### 3. Generate Scree Plot
+```{r}
+VAF <- cumsum(pca_train$sdev^2/sum(pca_train$sdev^2))
+plot(x=c(1:length(train_scale)), y=VAF, xlab="Number of Components", type="l",main='Scree plot of Number of Components vs VAF')
+```
+
+```{r}
+VAF
+```
+
+Based on our scree plot and the VAF calculation, we decided that the best number of components is 6 because it accounts for 89% of the variability. 
+
+### 4. Plot loadings
+We plotted the loadings to visualize our PCA analysis. As seen in the plots below: `ptratio`,`lstat`,`tax`,`indus`,`age`,`nox`, and `crim` all move in similar directions and `dis`,`zn`,`black`, and `rm` move in the opposite direction. Also seen in the plots, components 1 and 2 have the biggest explanatory power in the VAF which is consistent with most principal component analysis. 
+```{r}
+par(mfrow=c(2,3))
+biplot(pca_train,c(1,2))
+biplot(pca_train,c(1,3))
+biplot(pca_train,c(1,4))
+biplot(pca_train,c(1,5))
+biplot(pca_train,c(1,6))
+```
+
+### Show component loadings are orthogonal
+We can see that the loadings are orthogonal because the transpose of the loadings multiplied by itself equals a diagonal matrix with zeroes off the diagonal. 
+```{r}
+l <- pca_train$loadings
+format(round(t(l) %*% l), nsmall = 1)
+```
+
+### Show component scores are orthogonal
+```{r}
+s <- pca_train$scores
+format(round(t(s) %*% s), nsmall = 1)
+```
+
+### Perform test validation
+We computed the R2 between train_scale and data matrix A. A=U %*% t(V) where V = loadings matrix and U = component scores. The 1:6 indicates we are using the first 6 components of the PCA model. You'll see that the computed R2 is equal to the VAF in the previous chart. 
+```{r}
+cor(as.vector(unlist(train_scale)), as.vector(pca_train$scores[,1:6] %*% t(pca_train$loadings)[1:6,]))^2
+```
+
+Computing the R2 using training data and first 6 components. Our model appears to be pretty effective according to our calculations.  
+```{r}
+preds <- predict(pca_train, newdata = test_scale)
+cor(as.vector(unlist(test_scale)), as.vector(preds[,1:6] %*% t(pca_train$loadings)[1:6,]))^2
+```
