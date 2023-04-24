@@ -1,0 +1,58 @@
+---
+title: "assignment_5_LNM_SoniaMankin"
+output: html_document
+date: "2023-02-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load cancer data from cancer.csv and define a new column dead that is either 1 for dead and 0 for not. 
+
+```{r}
+cancer_data <- read.csv("~/Downloads/cancer.csv", stringsAsFactors=TRUE)[,-1]
+cancer_data$death <- ifelse(cancer_data$status==2,1,0)
+head(cancer_data)
+#status = 2=death occured 
+#status=1=no event (they are censored)
+```
+
+### A. Fit Kaplan-Meier method on time and dead columns and plot survival function.
+
+```{r}
+library(survival)
+
+km.model<-survfit(Surv(time, death) ~ 1,data=cancer_data,type="kaplan-meier")
+km.model
+plot(km.model, conf.int=F, xlab='Months',ylab="%alive = s(t)", main="KM-Model-LNM")
+```
+
+### B. Median Survival time is 310 months. 
+```{r}
+km.model
+```
+### C. Print Kaplan-Meier estimates (timeline vs k-m estimate)
+
+```{r}
+time_df <- as.data.frame(cbind(km.model$time,km.model$surv))
+colnames(time_df) <- c('Time','K-M estimate')
+time_df
+```
+### D. Create a combined plot where male and female groups’ Kaplan-Meier survival functions displayed
+
+```{r warning=FALSE}
+km.model2<-survfit(Surv(time,death) ~ sex,data=cancer_data, type="kaplan-meier")
+
+
+{plot(km.model2, conf.int=F, xlab='Months',ylab="%alive = s(t)", main="KM-Model-LNM", las=1, lwd=2, col=c('green','blue'),mark.time=TRUE)
+legend(400,0.95,legend=c('Male','Female'),lty=1, lwd=2, col=c('green','blue'),bty="", cex=0.6)}
+```
+
+### E. Conduct a log-rank test and test the null hypothesis that there is no difference in survival between 2 groups, namely male vs female. We reject the null hypothesis because the p value is less than 0.05 -- there is a difference in survival between the two groups. 
+
+```{r}
+
+survdiff(Surv(time, death) ~ sex,data=cancer_data)
+```
+
