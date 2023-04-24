@@ -1,0 +1,77 @@
+---
+title: "final_eda"
+output: html_document
+date: "2023-03-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Correlation visualizations
+```{r}
+library(corrplot)
+library(ggplot2)
+
+heart <- read.csv('~/Downloads/heart_failure_clinical_records_dataset.csv',stringsAsFactors = TRUE)
+colnames(heart)
+heart_ex_death <- heart[,!colnames(heart) %in% c('DEATH_EVENT')]
+colnames(heart_ex_death)
+
+
+summary(heart_ex_death)
+
+corr_data <- heart[,!colnames(heart) %in% c('DEATH_EVENT','anaemia','diabetes','sex','high_blood_pressure','smoking')]
+corrmatrix <- cor(corr_data)
+
+corrmatrix
+corrplot(corrmatrix, method = 'circle')
+
+
+cor.mtest <- function(mat) {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat<- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j])
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+# matrix of the p-value of the correlation
+p.mat <- cor.mtest(corr_data)
+head(p.mat[, 1:5])
+
+corrplot(corrmatrix, type="upper", order='hclust',
+         p.mat = p.mat, sig.level = 0.05)
+
+
+```
+
+## Categorical Data
+
+
+```{r}
+ggplot(data=heart, aes(x=creatinine_phosphokinase, y=ejection_fraction, color=sex)) + 
+  geom_point()
+
+require(gridExtra)
+plot1 <- ggplot(data = heart) +geom_bar(mapping = aes(x = sex))
+plot2 <- ggplot(data = heart) +
+  geom_bar(mapping = aes(x = diabetes))
+plot3 <- ggplot(data = heart) +
+  geom_bar(mapping = aes(x = smoking))
+plot4 <- ggplot(data = heart) +
+  geom_bar(mapping = aes(x = high_blood_pressure))
+grid.arrange(plot1, plot2,plot3,plot4, ncol=2,nrow=2)
+
+ggplot(data = heart) +
+geom_bar(mapping = aes(x = sex)) #scale_x_discrete(expand=c(0.0, 1))
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

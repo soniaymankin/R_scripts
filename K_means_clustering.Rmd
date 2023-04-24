@@ -1,0 +1,178 @@
+---
+title: "Group10_assignment2"
+output: html_document
+date: "2023-01-15"
+---
+##### Members: Aaron Chan, Alice Wang, Sonia Mankin
+
+### Load in dataset
+```{r}
+library(MASS)
+data(Boston)
+head(Boston)
+```
+
+### 1. Selecting variables
+Variables: `crim`,`zn`,`indus`,`nox`,`rm`,`age`,`dis`,`tax`,`ptratio`,`black`,`lstat`,`medv`
+Selected all variables available that were not indicator variables (excluded charles river variable). As seen in the summary below, the Charles river variable is an indicator, taking only values of 0 and 1. 
+
+```{r}
+summary(Boston)
+vars <- c('crim','zn','indus','nox','rm','age','dis','tax','ptratio','black','lstat','medv')
+
+bos <- Boston[vars]
+head(bos)
+```
+
+### 2. Split into train and test
+```{r}
+set.seed(42)
+dt <- sort(sample(nrow(bos), nrow(bos)*.70)) # perform sampling without replacement. Split into train and test
+train <- bos[dt,]
+test <- bos[-dt,]
+```
+
+### Scaling the data (Standard scaling)
+```{r} 
+# scale function in R does not allow the scaling of test data by training data parameters
+
+# find mean and sd column-wise of training data
+trainMean <- apply(train,2,mean)
+trainSd <- apply(train,2,sd)
+
+# using standard scaling
+train_scale <- sweep(sweep(train, 2L, trainMean), 2, trainSd, "/")
+test_scale <- sweep(sweep(test, 2L, trainMean), 2, trainSd, "/")
+```
+
+### 3. Generating K-means Solution
+```{r message=FALSE}
+library(dplyr)
+
+# Initialize storage variables
+vaf <- NULL
+sizes <- NULL
+centers <- NULL
+
+for (i in 2:10) {
+  set.seed(42)
+  mod <- kmeans(train_scale, centers = i, nstart = 100) # nstart option attempts multiple initial configurations and reports on the best one
+  
+  tmp1 <- data.frame(VAF=mod$betweenss / mod$totss) # Variance accounted for (VAF)
+  tmp1['k'] <- i # add column to identify the num of k clusters used for this result
+  
+  tmp2 <- data.frame(t(mod$size)) # Cluster sizes
+  tmp2['k'] <- i
+  
+  tmp3 <- data.frame(mod$centers) # Cluster centers
+  tmp3['k'] <- i
+  
+  # adding values to storage variables
+  if (is.null(vaf)) {
+    vaf <- tmp1
+    sizes <- tmp2
+    centers <- tmp3
+  } else {
+    vaf <- rbind(vaf,tmp1)
+    sizes <- dplyr::bind_rows(sizes, tmp2) # dplyr's bind_rows accounts for missing column values in 'sizes' dataframe of previous k values
+    centers <- rbind(centers,tmp3)
+  }
+}
+
+sizes <- sizes %>% relocate(k, .after = last_col()) # move 'k' column to the end for legibility
+```
+
+### 4,5. Scree Plot
+```{r}
+plot(x = vaf$k,y = vaf$VAF, type = 'l', main = 'Scree Plot for K-means Clustering',xlab='K Clusters',ylab='VAF')
+#vaf[vaf$k == 5, ] # VAF at optimal value
+```
+From the scree plot generated, the curve was pretty smooth. It seemed that 3 or 5 clusters would be the most effective number of groups our data set. The "elbow" in the chart occurs at both values of k = 3 and k = 5, and the change in VAF does not continue to increase as dramatically as we continue to add more clusters from each point. With 3 clusters our variance accounted for is: 0.4502862 meaning that our k-means model with 3 clusters accounts for almost 45% of the variance in our data. With 5 clusters our variance accounted for is: 0.5854744	 meaning that our k-means model with 5 clusters accounts for above 58% of the variance in our data. For this reason we selected 5 clusters as our most effective number. 
+
+### 6.1,6.2. Testing optimal K-means
+```{r}
+vaf[vaf$k == 5, ] # VAF at optimal value
+sizes[sizes$k == 5,] # cluster size at optimal 
+centers[centers$k == 5,] # cluster centers at optimal
+
+```
+The results of the k-means model built using 5 clusters are interesting. For starters, it has a VAF of 0.5854744, meaning that our k-means model with 5 clusters accounts for almost 59% of the variance in our data. We have two larger clusters with sizes above 100 observations and three smaller clusters with sizes ranging from 20-60. 
+
+
+### 6.2 Running k-means on Test data
+
+```{r}
+set.seed(42)
+k_test <- kmeans(test_scale, centers = centers[centers$k == 5, !names(centers) %in% c("k")]) # Run k-means using test data and train centers, exclude k column in centers df as it is an indicator and not part of analysis
+```
+
+When our k-means model is run using test data and the centers from the model using training data, we get similar results. One interesting note is that VAF is surprisingly higher at 68.1%. This indicates that our initial model could be useful for grouping new data. The cluster sizes are similar in pattern to our initial model: see plot below. The values in the cluster means appear to be similar as well, in the bar chart below we isolated the centers for the `crim` column across the test and train datasets. The pattern of the means holds true across both test and train. 
+
+```{r}
+
+size <- list()
+centroid <- list()
+for (i in 2:10){
+  set.seed(42)
+  K <- kmeans(train_scale, i, nstart = 100)
+  size[[i]] <- K$size
+  centroid[[i]] <- K$centers
+
+}
+
+K_test <- kmeans(test_scale,centers = centroid[[5]],nstart=100)
+size_test <- K_test$size
+size_train <- size[[5]]
+size_data <- cbind(size_test,size_train)
+barplot(size_data, beside = T,main='Sizes between Test and Train Data')
+
+center_test <- K_test$centers
+center_train <- centroid[[5]]
+center_data <- cbind(center_test[,1],center_train[,1])
+colnames(center_data) <- c("center_test", "center_train")
+barplot(center_data,beside=T,ylab='Center Mean',main='Centers between Test and Train Data')
+```
+
+The results for k-means clustering at k = 5 using training and testing data indicate that our model appears to be reasonably stable. 
+
+### 7. Generate Gaussian Mixture Models
+```{r message=FALSE}
+library(mclust)
+set.seed(42)
+gmod <- Mclust(train_scale, G=3:5)
+summary(gmod)
+gmod$parameters$mean
+summary(gmod)
+```
+
+### 8,9. Comparing K-means with Gaussian Mixture Models
+
+Both k-means and gaussian mixture models pointed to an optimal cluster size being 5 clusters. The sizes of the Gaussian Mixture clusters are a bit more even ie all clusters had between 50 and 100 observations, rather than the k-means clusters.
+
+Both models identified crime rate as key differentiator between clusters. Looking at charts of both our Gaussian clusters and k-means (see below), it appears that k-means has less overlap amongst the clusters which allows for greater distinction between groups. This would allow for greater business use cases because businesses are able to discern and target groups more specifically with k-means. 
+
+From the results of our k-means using scaled training data, there are some clear groups we can name based off the values of the centers:
+
+The first group has a lower crime rate but similar to the third and fourth. Looking at our chart below for our k-means clusters, we can see that the first group falls pretty in between all the other clusters so it does not have a particularly distinguishing feature. 
+
+The second group has the second highest crime rate, second lowest population on average of Black people, and in many ways imitates the fifth cluster as also seen on our chart. The second cluster and fifth cluster have the largest overlap. 
+
+The third cluster has the highest value in the `rm` column, lowest in the `ptratio` column, lowest in the `lstat` column, and highest in the `medv` column. This indicates that this group has the highest number of rooms in the houses on average, lowest student to teacher ratio, lower proportion of people of low status (according to the dataset), and highest median value of occupied homes. We can call this group wealthy large homes in educated areas. 
+
+The fourth cluster has the lowest age, the highest value in the `zn` column, and the lowest value in the `indus` column. This may code for large houses (given the high value of `zn` which codes for proportion of residential land for lots over 2500 sqft) in newly developed suburbs because the low value of `indus` indicates that the houses are not close to retail locations. The houses may be new given the low average of the `age` variable. We can call this group the new large suburban houses. 
+
+The fifth cluster has the highest crime rate, the lowest population on average of Black people, highest value in the `nox` column which indicates level of nitrous oxide emissions, and highest value in the `age` column. The `dist` column is also the lowest which indicates the least distance to five Boston employment centers. Nitrous oxide and age could have a relationship because older buildings may not have construction to limit nitrous oxide emissions. We can call this group old Boston working class housing. 
+
+
+```{r, message=FALSE}
+library(factoextra)
+```
+
+```{r}
+set.seed(42)
+k_mod <- kmeans(train_scale,5,nstart=100)
+fviz_cluster(gmod,data=train_scale,ellipse.type='norm',main='Gaussian Mixture Clusters')
+fviz_cluster(k_mod,train_scale,ellipse.type='norm',main='K-means Clusters')
+
+```
+
